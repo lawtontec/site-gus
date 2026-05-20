@@ -35,7 +35,9 @@
     .btn-primary:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
     .btn-secondary{background:transparent;color:var(--gus-white);border-color:var(--gus-white)}
     .btn-secondary:hover{background:rgba(255,255,255,.15)}
-    .hero-shield{width:200px;height:auto;filter:drop-shadow(0 10px 20px rgba(0,0,0,.3))}
+    .hero-shield{width:170px;height:auto;filter:drop-shadow(0 10px 20px rgba(0,0,0,.3))}
+    .hero-mascote{width:240px;height:auto;max-height:320px;object-fit:contain;filter:drop-shadow(0 15px 25px rgba(0,0,0,.45))}
+    .hero-visuals{display:flex;align-items:center;gap:1rem}
     .section{padding:4rem 0}
     .section-alt{background:var(--gus-white)}
     .section-header{text-align:center;margin-bottom:2.5rem}
@@ -113,6 +115,7 @@
       .hero-content{grid-template-columns:1fr;text-align:center}
       .hero-cta{justify-content:center}
       .hero-shield{margin:0 auto;width:140px}
+      .hero-mascote{margin:0 auto;width:180px;max-height:240px}
       .section{padding:2.5rem 0}
       .brand-title{font-size:1.75rem}
     }
@@ -153,14 +156,17 @@
           <a href="#rankings" class="btn btn-secondary">Rankings +65 / -65</a>
         </div>
       </div>
-      <svg class="hero-shield" viewBox="0 0 200 165" xmlns="http://www.w3.org/2000/svg">
-        <rect x="0" y="0" width="200" height="165" fill="#1E40AF" rx="6"/>
-        <rect x="8" y="8" width="184" height="149" fill="#FFFFFF" rx="3"/>
-        <rect x="18" y="18" width="56" height="129" fill="#DC2626"/>
-        <rect x="18" y="93" width="164" height="54" fill="#1E40AF"/>
-        <polygon points="46,32 51,46 66,46 54,55 59,69 46,60 33,69 38,55 26,46 41,46" fill="#FFFFFF"/>
-        <text x="100" y="132" font-family="Arial Black, sans-serif" font-size="34" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">G.U.S.</text>
-      </svg>
+      <div class="hero-visuals">
+        <img class="hero-mascote" src="mascote.png" alt="Mascote G.U.S." />
+        <svg class="hero-shield" viewBox="0 0 200 165" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0" y="0" width="200" height="165" fill="#1E40AF" rx="6"/>
+          <rect x="8" y="8" width="184" height="149" fill="#FFFFFF" rx="3"/>
+          <rect x="18" y="18" width="56" height="129" fill="#DC2626"/>
+          <rect x="18" y="93" width="164" height="54" fill="#1E40AF"/>
+          <polygon points="46,32 51,46 66,46 54,55 59,69 46,60 33,69 38,55 26,46 41,46" fill="#FFFFFF"/>
+          <text x="100" y="132" font-family="Arial Black, sans-serif" font-size="34" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">G.U.S.</text>
+        </svg>
+      </div>
     </div>
   </section>
   <section id="dashboard" class="section">
@@ -333,20 +339,4 @@
         th.addEventListener('click', () => {
           const col = th.dataset.sort;
           if (sortState.col === col) sortState.dir = sortState.dir==='asc' ? 'desc' : 'asc';
-          else { sortState.col = col; sortState.dir = ['apelido','classif'].includes(col) ? 'asc' : 'desc'; }
-          renderFullTable();
-        });
-      });
-    }
-    renderStats();
-    renderEvolucaoChart();
-    renderTop5();
-    renderRankings();
-    renderFullTable();
-    setupTabs();
-    setupFilters();
-    setupSorting();
-    document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
-  </script>
-</body>
-</h
+          else { sortState.col = col; sortState.dir = 
