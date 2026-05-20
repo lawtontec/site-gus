@@ -339,4 +339,20 @@
         th.addEventListener('click', () => {
           const col = th.dataset.sort;
           if (sortState.col === col) sortState.dir = sortState.dir==='asc' ? 'desc' : 'asc';
-          else { sortState.col = col; sortState.dir = 
+          else { sortState.col = col; sortState.dir = ['apelido','classif'].includes(col) ? 'asc' : 'desc'; }
+          renderFullTable();
+        });
+      });
+    }
+    renderStats();
+    renderEvolucaoChart();
+    renderTop5();
+    renderRankings();
+    renderFullTable();
+    setupTabs();
+    setupFilters();
+    setupSorting();
+    document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
+  </script>
+</body>
+</html>
