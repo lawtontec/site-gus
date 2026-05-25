@@ -8,277 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-    // ============ ADMIN PANEL ============
-    (function(){
-      const panel = document.getElementById('admin-panel');
-      const fab = document.getElementById('admin-fab');
-      const tokenInput = document.getElementById('admin-token');
-      const fileInput = document.getElementById('admin-file');
-      const publishBtn = document.getElementById('admin-publish');
-      const closeBtn = document.getElementById('admin-close');
-      const msgEl = document.getElementById('admin-msg');
-      const previewEl = document.getElementById('admin-preview');
-      let newData = null;
-
-      function openPanel(){ panel.classList.add('open'); }
-      function closePanel(){ panel.classList.remove('open'); }
-      function msg(text, type){
-        msgEl.innerHTML = '<div class="admin-msg admin-msg-'+type+'">'+text+'</div>';
-      }
-
-      // Open via ?admin=1 / #admin / FAB / Ctrl+Shift+A
-      if (location.search.includes('admin') || location.hash === '#admin') openPanel();
-      fab.addEventListener('click', openPanel);
-      closeBtn.addEventListener('click', closePanel);
-      document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-          e.preventDefault();
-          panel.classList.toggle('open');
-        }
-        if (e.key === 'Escape' && panel.classList.contains('open')) closePanel();
-      });
-
-      // Restore token
-      const saved = localStorage.getItem('gus_pat');
-      if (saved) tokenInput.value = saved;
-
-      // Process file
-      fileInput.addEventListener('change', async e => {
-        const file = e.target.files[0];
-        if (!file) return;
-        publishBtn.disabled = true;
-        previewEl.innerHTML = '';
-        try {
-          msg('Carregando biblioteca de Excel...', 'info');
-          if (typeof XLSX === 'undefined') {
-            await new Promise((res, rej) => {
-              const s = document.createElement('script');
-              s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-              s.onload = res; s.onerror = () => rej(new Error('falha ao carregar SheetJS'));
-              document.head.appendChild(s);
-            });
-          }
-          msg('Processando planilha...', 'info');
-          const buf = await file.arrayBuffer();
-          newData = processWorkbook(buf);
-          showPreview(newData);
-          publishBtn.disabled = false;
-          msg('Planilha processada com sucesso. Confira a prévia e clique em Publicar.', 'success');
-        } catch (err) {
-          msg('Erro ao processar: ' + err.message, 'error');
-          console.error(err);
-        }
-      });
-
-      function processWorkbook(buf){
-        const wb = XLSX.read(buf, {cellFormula: true, cellDates: true});
-        const EXCLUDE = ['Tulio', 'Claudio', 'Gol Contra', 'Devas'];
-
-        // Aba Idade
-        const wsIdade = wb.Sheets['Idade'];
-        if (!wsIdade) throw new Error('Aba "Idade" não encontrada');
-        const idadeRows = XLSX.utils.sheet_to_json(wsIdade, {header: 1, blankrows: false, defval: null});
-        const apelidoInfo = {};
-        for (const row of idadeRows){
-          const num = row[1], nome = row[2], apelido = row[4], idade = row[7], classif = row[8];
-          if (typeof num !== 'number' || !apelido || typeof apelido !== 'string') continue;
-          apelidoInfo[apelido.trim()] = {
-            apelido: apelido.trim(),
-            nome: typeof nome === 'string' ? nome.trim() : apelido.trim(),
-            idade: typeof idade === 'number' ? Math.floor(idade) : null,
-            classif: classif || 'Mensalista'
-          };
-        }
-
-        function processSheet(name){
-          const ws = wb.Sheets[name];
-          if (!ws) throw new Error('Aba "'+name+'" não encontrada');
-          const range = XLSX.utils.decode_range(ws['!ref']);
-          // Row 4 (index 3) has dates. Find valid cols (skip SUM totalizer cols).
-          const validCols = [];
-          for (let c = range.s.c; c <= range.e.c; c++){
-            const ref = XLSX.utils.encode_cell({r: 3, c});
-            const cell = ws[ref];
-            if (!cell || !(cell.v instanceof Date)) continue;
-            let isSumCol = false;
-            for (let r = 4; r <= Math.min(range.e.r, 50); r++){
-              const dref = XLSX.utils.encode_cell({r, c});
-              const dcell = ws[dref];
-              if (dcell && dcell.f && dcell.f.indexOf('SUM(') !== -1){
-                isSumCol = true;
-                break;
-              }
-            }
-            if (!isSumCol) validCols.push({col: c, date: cell.v});
-          }
-
-          function fixDate(d){
-            const x = new Date(d);
-            // Excel year bug: 2026-12-XX should be 2025-12-XX
-            if (x.getUTCFullYear() === 2026 && x.getUTCMonth() === 11){
-              x.setUTCFullYear(2025);
-            }
-            return x.toISOString().substring(0, 10);
-          }
-
-          const timeline = {};
-          const playerTotals = {};
-          validCols.forEach(({date}) => { timeline[fixDate(date)] = 0; });
-
-          for (let r = 4; r <= range.e.r; r++){
-            const nref = XLSX.utils.encode_cell({r, c: 1});
-            const ncell = ws[nref];
-            if (!ncell || typeof ncell.v !== 'string') continue;
-            const name = ncell.v.trim();
-            if (name === 'Datas' || !name) continue;
-            for (const {col, date} of validCols){
-              const dref = XLSX.utils.encode_cell({r, c: col});
-              const dcell = ws[dref];
-              const v = dcell && typeof dcell.v === 'number' ? dcell.v : 0;
-              if (v > 0){
-                playerTotals[name] = (playerTotals[name] || 0) + v;
-                const key = fixDate(date);
-                timeline[key] = (timeline[key] || 0) + v;
-              }
-            }
-          }
-          return {playerTotals, timeline};
-        }
-
-        const golsData = processSheet('Gols');
-        const astData = processSheet('Assistência');
-
-        const allDates = new Set([...Object.keys(golsData.timeline), ...Object.keys(astData.timeline)]);
-        const timeline = Array.from(allDates).sort().map(d => ({
-          date: d,
-          gols: golsData.timeline[d] || 0,
-          assists: astData.timeline[d] || 0
-        })).filter(t => t.gols > 0 || t.assists > 0);
-
-        const allApelidos = new Set([...Object.keys(golsData.playerTotals), ...Object.keys(astData.playerTotals)]);
-        const players = [];
-        for (const apelido of allApelidos){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          const info = apelidoInfo[apelido];
-          if (!info || info.idade == null) continue;
-          players.push(Object.assign({}, info, {
-            gols: golsData.playerTotals[apelido] || 0,
-            assists: astData.playerTotals[apelido] || 0
-          }));
-        }
-        for (const apelido in apelidoInfo){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          if (apelidoInfo[apelido].idade == null) continue;
-          if (!allApelidos.has(apelido)){
-            players.push(Object.assign({}, apelidoInfo[apelido], {gols: 0, assists: 0}));
-          }
-        }
-
-        const totalGols = Object.values(golsData.playerTotals).reduce((a,b) => a+b, 0);
-        const totalAst = Object.values(astData.playerTotals).reduce((a,b) => a+b, 0);
-        const jogos = timeline.length;
-        const today = new Date().toISOString().substring(0, 10);
-
-        return {
-          totais: {
-            jogos,
-            gols: totalGols,
-            assists: totalAst,
-            mediaGols: jogos > 0 ? Math.round(totalGols/jogos * 100)/100 : 0,
-            mediaAssists: jogos > 0 ? Math.round(totalAst/jogos * 100)/100 : 0
-          },
-          timeline,
-          players,
-          atualizadoEm: today
-        };
-      }
-
-      function diff(a, b){
-        if (a === b) return '<span class="diff-same">'+b+'</span>';
-        return '<span class="diff-old">'+a+'</span> → <span class="diff-new">'+b+'</span>';
-      }
-
-      function showPreview(d){
-        const o = DATA;
-        const topG = d.players.filter(p => p.gols > 0).sort((a,b) => b.gols - a.gols).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.gols + ')').join(', ');
-        const topA = d.players.filter(p => p.assists > 0).sort((a,b) => b.assists - a.assists).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.assists + ')').join(', ');
-        previewEl.innerHTML =
-          '<div class="admin-preview">' +
-          '<div class="row"><span>Jogos disputados</span><span>'+diff(o.totais.jogos, d.totais.jogos)+'</span></div>' +
-          '<div class="row"><span>Gols marcados</span><span>'+diff(o.totais.gols, d.totais.gols)+'</span></div>' +
-          '<div class="row"><span>Assistências</span><span>'+diff(o.totais.assists, d.totais.assists)+'</span></div>' +
-          '<div class="row"><span>Média gols/jogo</span><span>'+diff(o.totais.mediaGols, d.totais.mediaGols)+'</span></div>' +
-          '<div class="row"><span>Total jogadores</span><span>'+diff(o.players.length, d.players.length)+'</span></div>' +
-          '<div class="row"><span>Top 3 artilheiros</span><span class="diff-new">'+topG+'</span></div>' +
-          '<div class="row"><span>Top 3 assistências</span><span class="diff-new">'+topA+'</span></div>' +
-          '<div class="row"><span>Atualizado em</span><span class="diff-new">'+d.atualizadoEm+'</span></div>' +
-          '</div>';
-      }
-
-      // Publish via GitHub API
-      publishBtn.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token){ msg('Cole seu token do GitHub primeiro', 'error'); return; }
-        if (!newData){ msg('Carregue a planilha primeiro', 'error'); return; }
-        localStorage.setItem('gus_pat', token);
-        publishBtn.disabled = true;
-        msg('Publicando no GitHub...', 'info');
-        try {
-          const repo = 'lawtontec/site-gus';
-          const path = 'index.html';
-          const apiBase = 'https://api.github.com/repos/' + repo + '/contents/' + path;
-          const headers = {
-            'Authorization': 'token ' + token,
-            'Accept': 'application/vnd.github.v3+json'
-          };
-          const getRes = await fetch(apiBase, {headers});
-          if (!getRes.ok) throw new Error('Não consegui ler o arquivo (status '+getRes.status+'). Token inválido?');
-          const fileInfo = await getRes.json();
-
-          // Decode (UTF-8 safe)
-          const b64 = fileInfo.content.replace(/\s/g, '');
-          const bin = atob(b64);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const current = new TextDecoder('utf-8').decode(bytes);
-
-          // Replace DATA
-          const newJson = JSON.stringify(newData);
-          const updated = current.replace(/const DATA = \{[\s\S]*?\};/, 'const DATA = ' + newJson + ';');
-          if (updated === current) throw new Error('Não achei "const DATA" no arquivo pra substituir');
-
-          // Encode back (UTF-8 safe)
-          const enc = new TextEncoder().encode(updated);
-          let binStr = '';
-          for (let i = 0; i < enc.length; i++) binStr += String.fromCharCode(enc[i]);
-          const newB64 = btoa(binStr);
-
-          const putRes = await fetch(apiBase, {
-            method: 'PUT',
-            headers: Object.assign({}, headers, {'Content-Type': 'application/json'}),
-            body: JSON.stringify({
-              message: 'Atualiza dados: ' + newData.totais.jogos + ' jogos, ' + newData.totais.gols + ' gols, ' + newData.totais.assists + ' assists',
-              content: newB64,
-              sha: fileInfo.sha
-            })
-          });
-          if (!putRes.ok){
-            const errText = await putRes.text();
-            throw new Error('Commit falhou ('+putRes.status+'): ' + errText.substring(0, 200));
-          }
-          msg('✓ Publicado! O Vercel vai atualizar o site em ~30 segundos. Aguarde 1 minuto e dê Ctrl+F5 pra confirmar.', 'success');
-        } catch (err) {
-          msg('Erro: ' + err.message, 'error');
-          publishBtn.disabled = false;
-          console.error(err);
-        }
-      });
-    })();
-
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root{--gus-red:#DC2626;--gus-red-dark:#B91C1C;--gus-blue:#1E40AF;--gus-blue-dark:#1E3A8A;--gus-white:#FFFFFF;--gray-50:#F9FAFB;--gray-100:#F3F4F6;--gray-200:#E5E7EB;--gray-500:#6B7280;--gray-700:#374151;--gray-900:#111827;--shadow-md:0 4px 6px -1px rgba(0,0,0,.08),0 2px 4px -2px rgba(0,0,0,.04);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.05);--radius:12px}
     *{box-sizing:border-box;margin:0;padding:0}
@@ -390,34 +120,41 @@
       .brand-title{font-size:1.75rem}
     }
   
-    .admin-fab{position:fixed;bottom:1rem;right:1rem;width:14px;height:14px;background:rgba(0,0,0,.15);border-radius:50%;z-index:50;cursor:pointer}
-    .admin-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;overflow-y:auto;padding:1.5rem;display:none}
-    .admin-panel.open{display:block}
-    .admin-box{background:#fff;max-width:700px;margin:0 auto;padding:2rem;border-radius:12px;color:#111}
-    .admin-box h2{color:#1E40AF;margin-bottom:.25rem}
-    .admin-box .subtitle{color:#6B7280;font-size:.9rem;margin-bottom:1.5rem}
-    .admin-box label{display:block;font-size:.85rem;font-weight:600;margin-top:1rem;margin-bottom:.35rem;color:#374151}
-    .admin-box input[type=text],.admin-box input[type=password]{width:100%;padding:.65rem;border:2px solid #E5E7EB;border-radius:8px;font-family:inherit;font-size:.9rem}
-    .admin-box input:focus{outline:none;border-color:#1E40AF}
-    .admin-box input[type=file]{width:100%;margin-top:.25rem;padding:.5rem;border:2px dashed #D1D5DB;border-radius:8px;background:#F9FAFB}
-    .admin-box small{display:block;font-size:.75rem;color:#6B7280;margin-top:.25rem}
-    .admin-box small a{color:#1E40AF}
-    .admin-actions{margin-top:1.5rem;display:flex;gap:.5rem;flex-wrap:wrap}
-    .admin-btn{cursor:pointer;border:none;font-family:inherit;padding:.7rem 1.2rem;border-radius:8px;font-weight:600;font-size:.9rem;transition:opacity .15s}
-    .admin-btn-publish{background:#10B981;color:#fff}
-    .admin-btn-publish:disabled{background:#9CA3AF;cursor:not-allowed;opacity:.6}
-    .admin-btn-publish:not(:disabled):hover{opacity:.9}
-    .admin-btn-close{background:#E5E7EB;color:#111}
-    .admin-msg{padding:.75rem 1rem;border-radius:8px;margin-top:1rem;font-size:.88rem;line-height:1.4}
-    .admin-msg-success{background:#D1FAE5;color:#065F46;border-left:3px solid #10B981}
-    .admin-msg-error{background:#FEE2E2;color:#991B1B;border-left:3px solid #DC2626}
-    .admin-msg-info{background:#DBEAFE;color:#1E3A8A;border-left:3px solid #1E40AF}
-    .admin-preview{background:#F3F4F6;padding:1rem;border-radius:8px;margin-top:1rem;font-size:.88rem;line-height:1.7}
-    .admin-preview .row{display:flex;justify-content:space-between;padding:.15rem 0;border-bottom:1px dashed #D1D5DB}
-    .admin-preview .row:last-child{border-bottom:none}
-    .admin-preview .diff-old{color:#6B7280;text-decoration:line-through}
-    .admin-preview .diff-new{color:#1E40AF;font-weight:700}
-    .admin-preview .diff-same{color:#374151;font-weight:600}
+    .upload-card{background:var(--gus-white);border-radius:var(--radius);padding:2rem;box-shadow:var(--shadow-md);border-top:3px solid var(--gus-red);max-width:720px;margin:0 auto}
+    .upload-card h3{color:var(--gus-blue-dark);font-size:1.2rem;margin-bottom:.5rem}
+    .upload-card p.lead{color:var(--gray-500);font-size:.95rem;margin-bottom:1.5rem}
+    .upload-card label{display:block;font-size:.85rem;font-weight:700;color:var(--gray-700);margin-top:1.25rem;margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.5px}
+    .upload-card input[type=text],.upload-card input[type=password]{width:100%;padding:.7rem 1rem;border:2px solid var(--gray-200);border-radius:8px;font-family:inherit;font-size:.95rem;background:var(--gray-50)}
+    .upload-card input[type=password]:focus,.upload-card input[type=text]:focus{outline:none;border-color:var(--gus-blue);background:var(--gus-white)}
+    .upload-card small{display:block;font-size:.78rem;color:var(--gray-500);margin-top:.3rem}
+    .upload-card small a{color:var(--gus-blue);font-weight:600}
+    .upload-dropzone{margin-top:.5rem;padding:2rem 1rem;border:2px dashed var(--gray-300);border-radius:10px;background:var(--gray-50);text-align:center;cursor:pointer;transition:background .15s,border-color .15s}
+    .upload-dropzone:hover{background:#EFF6FF;border-color:var(--gus-blue)}
+    .upload-dropzone.has-file{background:#F0FDF4;border-color:#10B981}
+    .upload-dropzone-icon{font-size:2rem;color:var(--gus-blue);font-family:'Bebas Neue',sans-serif}
+    .upload-dropzone-text{font-size:.95rem;color:var(--gray-700);margin-top:.5rem}
+    .upload-dropzone-hint{font-size:.78rem;color:var(--gray-500);margin-top:.25rem}
+    .upload-dropzone input{display:none}
+    .upload-actions{margin-top:1.5rem;display:flex;gap:.5rem;flex-wrap:wrap}
+    .upload-btn{cursor:pointer;border:none;font-family:inherit;padding:.85rem 1.5rem;border-radius:8px;font-weight:700;font-size:.95rem;transition:opacity .15s,transform .1s}
+    .upload-btn:not(:disabled):active{transform:translateY(1px)}
+    .upload-btn-publish{background:var(--gus-red);color:#fff}
+    .upload-btn-publish:disabled{background:var(--gray-300);color:var(--gray-500);cursor:not-allowed}
+    .upload-btn-publish:not(:disabled):hover{background:var(--gus-red-dark)}
+    .upload-btn-reset{background:var(--gray-200);color:var(--gray-700)}
+    .upload-msg{padding:.85rem 1.1rem;border-radius:8px;margin-top:1rem;font-size:.9rem;line-height:1.5}
+    .upload-msg-success{background:#D1FAE5;color:#065F46;border-left:3px solid #10B981}
+    .upload-msg-error{background:#FEE2E2;color:#991B1B;border-left:3px solid var(--gus-red)}
+    .upload-msg-info{background:#DBEAFE;color:var(--gus-blue-dark);border-left:3px solid var(--gus-blue)}
+    .upload-preview{background:var(--gray-50);padding:1.25rem;border-radius:10px;margin-top:1.25rem;border:1px solid var(--gray-200)}
+    .upload-preview h4{color:var(--gus-blue-dark);font-size:.95rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.5px}
+    .upload-preview .row{display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px dashed var(--gray-200);font-size:.9rem}
+    .upload-preview .row:last-child{border-bottom:none}
+    .upload-preview .row .label{color:var(--gray-500);font-weight:600}
+    .upload-preview .row .val{color:var(--gray-900);text-align:right}
+    .upload-preview .diff-old{color:var(--gray-500);text-decoration:line-through;font-weight:400;margin-right:.4rem}
+    .upload-preview .diff-new{color:var(--gus-blue-dark);font-weight:700}
+    .upload-preview .diff-same{color:var(--gray-700);font-weight:600}
 
   </style>
 </head>
@@ -442,6 +179,8 @@
         <a href="#dashboard" class="nav-link">Dashboard</a>
         <a href="#rankings" class="nav-link">Rankings</a>
         <a href="#jogadores" class="nav-link">Jogadores</a>
+      
+        <a href="#novos-dados" class="nav-link">Novos Dados</a>
       </nav>
     </div>
   </header>
@@ -533,30 +272,40 @@
       </div>
     </div>
   </section>
-  <footer class="footer"><div class="container footer-content"><p>G.U.S. · Coordenação MGM 2026</p><p class="footer-update">Atualizado em <span id="updated-at"></span></p></div></footer>
-  <div class="admin-panel" id="admin-panel">
-    <div class="admin-box">
-      <h2>Painel Admin</h2>
-      <p class="subtitle">Atualizar dados a partir da planilha Excel</p>
+  <section id="novos-dados" class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Novos Dados</h2>
+        <p class="section-desc">Atualize as estatísticas enviando a planilha Excel</p>
+      </div>
+      <div class="upload-card">
+        <h3>Carregar planilha</h3>
+        <p class="lead">Envie a planilha de controle do G.U.S. (.xlsx). O site mostra uma prévia dos números atualizados e, se você for o coordenador, publica direto no ar.</p>
 
-      <label for="admin-token">Token do GitHub</label>
-      <input type="password" id="admin-token" placeholder="ghp_..." autocomplete="off" />
-      <small>Fica salvo só neste navegador. Sem token? <a href="https://github.com/settings/tokens/new?description=site-gus-admin&scopes=repo" target="_blank" rel="noopener">Criar um novo</a></small>
+        <label for="upload-file">Planilha (.xlsx)</label>
+        <label class="upload-dropzone" for="upload-file" id="upload-dropzone">
+          <div class="upload-dropzone-icon">+</div>
+          <div class="upload-dropzone-text">Clique para escolher ou arraste a planilha aqui</div>
+          <div class="upload-dropzone-hint">Aceita apenas arquivos .xlsx</div>
+          <input type="file" id="upload-file" accept=".xlsx" />
+        </label>
 
-      <label for="admin-file">Planilha Excel (.xlsx)</label>
-      <input type="file" id="admin-file" accept=".xlsx" />
+        <label for="upload-token">Token do GitHub (apenas coordenador)</label>
+        <input type="password" id="upload-token" placeholder="ghp_... (opcional, só pra publicar)" autocomplete="off" />
+        <small>Fica salvo só neste navegador. Sem token, você vê só a prévia. <a href="https://github.com/settings/tokens/new?description=site-gus-admin&scopes=repo" target="_blank" rel="noopener">Criar token →</a></small>
 
-      <div id="admin-msg"></div>
-      <div id="admin-preview"></div>
+        <div id="upload-msg"></div>
+        <div id="upload-preview"></div>
 
-      <div class="admin-actions">
-        <button class="admin-btn admin-btn-publish" id="admin-publish" disabled>Publicar no site</button>
-        <button class="admin-btn admin-btn-close" id="admin-close">Fechar</button>
+        <div class="upload-actions">
+          <button class="upload-btn upload-btn-publish" id="upload-publish" disabled>Publicar no site</button>
+          <button class="upload-btn upload-btn-reset" id="upload-reset">Limpar</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="admin-fab" id="admin-fab" title="Admin (Ctrl+Shift+A)"></div>
+  </section>
 
+  <footer class="footer"><div class="container footer-content"><p>G.U.S. · Coordenação MGM 2026</p><p class="footer-update">Atualizado em <span id="updated-at"></span></p></div></footer>
   <script>
     const DATA = {"totais": {"jogos": 11, "gols": 104, "assists": 78, "mediaGols": 9.45, "mediaAssists": 7.09}, "timeline": [{"date": "2025-12-13", "gols": 12, "assists": 9}, {"date": "2025-12-17", "gols": 12, "assists": 7}, {"date": "2025-12-20", "gols": 11, "assists": 7}, {"date": "2025-12-24", "gols": 7, "assists": 5}, {"date": "2025-12-27", "gols": 8, "assists": 5}, {"date": "2025-12-31", "gols": 9, "assists": 7}, {"date": "2026-01-03", "gols": 10, "assists": 8}, {"date": "2026-01-07", "gols": 10, "assists": 7}, {"date": "2026-01-10", "gols": 9, "assists": 9}, {"date": "2026-01-14", "gols": 10, "assists": 10}, {"date": "2026-01-17", "gols": 6, "assists": 4}], "players": [{"apelido": "Gigio", "nome": "Adilson Roberto de Camargo", "idade": 58, "classif": "Mensalista", "gols": 2, "assists": 5}, {"apelido": "Zezinho", "nome": "José Rodrigues Santiago Neto", "idade": 57, "classif": "Mensalista", "gols": 3, "assists": 1}, {"apelido": "Mello", "nome": "Alexandre Lopes de Mello", "idade": 59, "classif": "Mensalista", "gols": 4, "assists": 4}, {"apelido": "Ivan", "nome": "Ivan Kleber Candido de Carvalho", "idade": 53, "classif": "Mensalista", "gols": 1, "assists": 3}, {"apelido": "Sandrinho", "nome": "Sandro Angelo de Oliveira", "idade": 55, "classif": "Mensalista", "gols": 2, "assists": 0}, {"apelido": "Neimar", "nome": "Neimar Godinho", "idade": 58, "classif": "Mensalista", "gols": 0, "assists": 1}, {"apelido": "Makey", "nome": "Alexandre Makei de Almeida", "idade": 55, "classif": "Mensalista", "gols": 0, "assists": 2}, {"apelido": "João Batista", "nome": "João Batista da Silva", "idade": 80, "classif": "Mensalista", "gols": 1, "assists": 0}, {"apelido": "Falcão", "nome": "João Luiz Falcão", "idade": 56, "classif": "Mensalista", "gols": 0, "assists": 1}, {"apelido": "Mido", "nome": "Romildo de Araujo Mido", "idade": 63, "classif": "Mensalista", "gols": 12, "assists": 10}, {"apelido": "João da Serra", "nome": "João Clarindo Bezerra", "idade": 63, "classif": "Mensalista", "gols": 1, "assists": 0}, {"apelido": "Meneguesso", "nome": "Julio Cesar Meneguesso", "idade": 61, "classif": "Mensalista", "gols": 0, "assists": 2}, {"apelido": "Lico", "nome": "Carlos Alberto S. de Alcantara", "idade": 59, "classif": "Mensalista", "gols": 1, "assists": 1}, {"apelido": "Mabel", "nome": "Paulo de Tarso Barbosa", "idade": 62, "classif": "Mensalista", "gols": 2, "assists": 1}, {"apelido": "Cebola", "nome": "Marcio Tadeu de Almeida e Silva", "idade": 57, "classif": "Mensalista", "gols": 0, "assists": 3}, {"apelido": "Samir", "nome": "Samir Chad", "idade": 49, "classif": "Mensalista", "gols": 0, "assists": 1}, {"apelido": "Arruda", "nome": "Marcos Roberto Martins Arruda", "idade": 50, "classif": "Mensalista", "gols": 3, "assists": 2}, {"apelido": "Mauricio", "nome": "Mauricio Santana", "idade": 54, "classif": "Mensalista", "gols": 8, "assists": 1}, {"apelido": "Masetto", "nome": "Paulo Roberto Masetto", "idade": 73, "classif": "Mensalista", "gols": 2, "assists": 0}, {"apelido": "Carlinhos", "nome": "Carlos Henrique Ferreira", "idade": 58, "classif": "Mensalista", "gols": 0, "assists": 1}, {"apelido": "Fernando", "nome": "Fernando A.Pereira Leite", "idade": 59, "classif": "Mensalista", "gols": 13, "assists": 4}, {"apelido": "James", "nome": "James Beal Munhoz", "idade": 77, "classif": "Mensalista", "gols": 3, "assists": 1}, {"apelido": "Dudu", "nome": "Vagner Camargo Borges", "idade": 62, "classif": "Mensalista", "gols": 6, "assists": 1}, {"apelido": "Scooby", "nome": "Altamir José Ximenes", "idade": 59, "classif": "Mensalista", "gols": 1, "assists": 1}, {"apelido": "Putch", "nome": "Sergio Luiz de Oliveira", "idade": 59, "classif": "Mensalista", "gols": 0, "assists": 1}, {"apelido": "Waguinho", "nome": "Wagner Marcelo Rocha Camargo", "idade": 56, "classif": "Mensalista", "gols": 11, "assists": 7}, {"apelido": "Roberto R6", "nome": "Roberto Gomes da Silva", "idade": 62, "classif": "Mensalista", "gols": 4, "assists": 4}, {"apelido": "Ruan", "nome": "Ruan Augusto Domingues da Silva", "idade": 27, "classif": "Mensalista", "gols": 1, "assists": 0}, {"apelido": "Pingão", "nome": "Carlos Alberto Lopes", "idade": 58, "classif": "Mensalista", "gols": 1, "assists": 0}, {"apelido": "Claudio Goes", "nome": "Claudio José de Góes", "idade": 64, "classif": "Mensalista", "gols": 1, "assists": 4}, {"apelido": "Olavo", "nome": "Olavo Domingues da Silva", "idade": 70, "classif": "Mensalista", "gols": 3, "assists": 1}, {"apelido": "Vinicio", "nome": "Vinicio Cesar Pensa", "idade": 77, "classif": "Mensalista", "gols": 1, "assists": 1}, {"apelido": "Guzzon", "nome": "Marcos Aurelio Guzzon", "idade": 56, "classif": "Mensalista", "gols": 9, "assists": 11}, {"apelido": "Elcio", "nome": "Elcio Yamada", "idade": 53, "classif": "Mensalista", "gols": 1, "assists": 1}, {"apelido": "Roberto Godinho", "nome": "Roberto Godinho", "idade": 78, "classif": "Mensalista", "gols": 3, "assists": 1}, {"apelido": "Alipio", "nome": "Alipio N. Lima Sobrinho", "idade": 71, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Paulão", "nome": "Paulo Ricardo Silva", "idade": 48, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Rafero", "nome": "Rafael Billar de Almeida", "idade": 49, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Tuco", "nome": "Elber Landrin", "idade": 52, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Leandro", "nome": "Leandro Amaro de Andrade", "idade": 52, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Dulão", "nome": "Eduardo Lombardi", "idade": 53, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Naco", "nome": "Alexandre Peroni", "idade": 55, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Claudinho", "nome": "Claudio Centalvi Junior", "idade": 55, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Luiz Paulo", "nome": "Luiz Paulo Capodaglio", "idade": 56, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Mario Sergio", "nome": "Mario Sergio Pedroso de Moraes", "idade": 56, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Marcelinho", "nome": "Marcelo Ghilardi", "idade": 57, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Sandro Godinho", "nome": "Sandro Lucio Godinho", "idade": 57, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Keller", "nome": "Keller Pereira Chagas", "idade": 58, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Odilon", "nome": "Odilon Roberto Costa Ferreira", "idade": 58, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Edson", "nome": "Edon Paulino", "idade": 60, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Laercio", "nome": "Laércio Ghirardelli", "idade": 60, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Marcos Mão de Pau", "nome": "Marcos Antonio da Costa", "idade": 61, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Dr. Rogério", "nome": "Rogério Wiezbicki", "idade": 62, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Zé Pennone", "nome": "Jose Eduardo Salvetti Pennone", "idade": 63, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Carlão", "nome": "Carlos Augusto Leme", "idade": 64, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Paia", "nome": "Inildo de Souza Soares", "idade": 64, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Curitiba", "nome": "Fabio Sebastião Curitiba Correa", "idade": 65, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Zito", "nome": "Benedito Roque de Campos", "idade": 66, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Jonas", "nome": "Jonas de Oliveira Costa", "idade": 66, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Sangrin", "nome": "Wilson Gonçalves da Silva", "idade": 66, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Dog", "nome": "Cleydson J. Paiva dos Santos", "idade": 67, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Mauro Celso", "nome": "Mauro Celso Novaes", "idade": 67, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Gika", "nome": "João Carlos Cruz", "idade": 68, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "João", "nome": "João Carlos de Araujo", "idade": 68, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Darcy", "nome": "Darcy Gonçalves de Oliveira", "idade": 69, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Miro", "nome": "Francisco Geomiro", "idade": 69, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Zé Moraes", "nome": "José Augusto Moraes", "idade": 69, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Osmar", "nome": "Osmar A de Oliveira Costa", "idade": 69, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Kimura", "nome": "Milton S. Kimura", "idade": 70, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "André", "nome": "André Aparecido Cardoso", "idade": 72, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Milton", "nome": "Milton Balliani Filho", "idade": 72, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Ney", "nome": "Sidney Alvares Moreno", "idade": 72, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Cabeção", "nome": "Paulo Eduardo Ribeiro", "idade": 73, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Carioca", "nome": "Roberto Alves de Mello", "idade": 73, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Ratto", "nome": "João Maria Almeida", "idade": 74, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Caparelli", "nome": "José Luiz Caparelli", "idade": 74, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Rios", "nome": "Antonio Carlos Pereira Rios", "idade": 75, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Finotti", "nome": "José Carlos Finotti", "idade": 75, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Flavio", "nome": "Flavio Alves de Lima", "idade": 76, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Devanir", "nome": "Devanir José Zanqueta", "idade": 77, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Vaguinho", "nome": "Vagner Pimenta de Moraes Vaguinho", "idade": 77, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Vitorinho", "nome": "Vitório Tozzi Junior", "idade": 77, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Zaga", "nome": "Luis Gonzaga Godinho", "idade": 78, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Efaneu", "nome": "Efaneu Nolasco Godinho", "idade": 79, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Lélio", "nome": "Lélio Góes", "idade": 79, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Eduardo", "nome": "Eduardo Estéfano Filho", "idade": 80, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Renatinho", "nome": "Renato Mendes", "idade": 81, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Chico Bio", "nome": "Francisco Honório Mendes", "idade": 82, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Alvaro", "nome": "Alvaro Pequeno da Silva", "idade": 83, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Tião", "nome": "Sebastião da Silva", "idade": 84, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Juvenal", "nome": "Juvenal Augusto de Moraes", "idade": 86, "classif": "Corneta", "gols": 0, "assists": 0}, {"apelido": "Cobrinha", "nome": "Osmar Soares da Silva", "idade": 88, "classif": "Mensalista", "gols": 0, "assists": 0}, {"apelido": "Iaiá", "nome": "Annibal P.H de Mello", "idade": 95, "classif": "Corneta", "gols": 0, "assists": 0}], "atualizadoEm": "2026-05-19"}
 ;
@@ -677,62 +426,75 @@
     setupSorting();
     document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
   
-    // ============ ADMIN PANEL ============
+    // ============ NOVOS DADOS (upload de planilha) ============
     (function(){
-      const panel = document.getElementById('admin-panel');
-      const fab = document.getElementById('admin-fab');
-      const tokenInput = document.getElementById('admin-token');
-      const fileInput = document.getElementById('admin-file');
-      const publishBtn = document.getElementById('admin-publish');
-      const closeBtn = document.getElementById('admin-close');
-      const msgEl = document.getElementById('admin-msg');
-      const previewEl = document.getElementById('admin-preview');
+      const fileInput = document.getElementById('upload-file');
+      const tokenInput = document.getElementById('upload-token');
+      const dropzone = document.getElementById('upload-dropzone');
+      const publishBtn = document.getElementById('upload-publish');
+      const resetBtn = document.getElementById('upload-reset');
+      const msgEl = document.getElementById('upload-msg');
+      const previewEl = document.getElementById('upload-preview');
       let newData = null;
+      let fileName = '';
 
-      function openPanel(){ panel.classList.add('open'); }
-      function closePanel(){ panel.classList.remove('open'); }
       function msg(text, type){
-        msgEl.innerHTML = '<div class="admin-msg admin-msg-'+type+'">'+text+'</div>';
+        msgEl.innerHTML = '<div class="upload-msg upload-msg-'+type+'">'+text+'</div>';
       }
 
-      // Open via ?admin=1 / #admin / FAB / Ctrl+Shift+A
-      if (location.search.includes('admin') || location.hash === '#admin') openPanel();
-      fab.addEventListener('click', openPanel);
-      closeBtn.addEventListener('click', closePanel);
-      document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-          e.preventDefault();
-          panel.classList.toggle('open');
-        }
-        if (e.key === 'Escape' && panel.classList.contains('open')) closePanel();
-      });
-
-      // Restore token
+      // Restore saved token
       const saved = localStorage.getItem('gus_pat');
       if (saved) tokenInput.value = saved;
+
+      // Drag & drop on dropzone
+      dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.style.background = '#EFF6FF'; });
+      dropzone.addEventListener('dragleave', () => { dropzone.style.background = ''; });
+      dropzone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropzone.style.background = '';
+        if (e.dataTransfer.files.length){
+          fileInput.files = e.dataTransfer.files;
+          fileInput.dispatchEvent(new Event('change'));
+        }
+      });
+
+      // Reset
+      resetBtn.addEventListener('click', () => {
+        fileInput.value = '';
+        newData = null;
+        fileName = '';
+        publishBtn.disabled = true;
+        previewEl.innerHTML = '';
+        msgEl.innerHTML = '';
+        dropzone.classList.remove('has-file');
+        dropzone.querySelector('.upload-dropzone-text').textContent = 'Clique para escolher ou arraste a planilha aqui';
+      });
 
       // Process file
       fileInput.addEventListener('change', async e => {
         const file = e.target.files[0];
         if (!file) return;
+        fileName = file.name;
         publishBtn.disabled = true;
         previewEl.innerHTML = '';
+        dropzone.classList.add('has-file');
+        dropzone.querySelector('.upload-dropzone-text').textContent = '✓ ' + file.name;
         try {
-          msg('Carregando biblioteca de Excel...', 'info');
-          if (typeof XLSX === 'undefined') {
+          msg('Carregando biblioteca para ler Excel...', 'info');
+          if (typeof XLSX === 'undefined'){
             await new Promise((res, rej) => {
               const s = document.createElement('script');
               s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-              s.onload = res; s.onerror = () => rej(new Error('falha ao carregar SheetJS'));
+              s.onload = res; s.onerror = () => rej(new Error('Não consegui baixar SheetJS'));
               document.head.appendChild(s);
             });
           }
-          msg('Processando planilha...', 'info');
+          msg('Processando a planilha...', 'info');
           const buf = await file.arrayBuffer();
           newData = processWorkbook(buf);
           showPreview(newData);
           publishBtn.disabled = false;
-          msg('Planilha processada com sucesso. Confira a prévia e clique em Publicar.', 'success');
+          msg('Planilha processada! Confira a prévia abaixo e clique em Publicar para atualizar o site oficial.', 'success');
         } catch (err) {
           msg('Erro ao processar: ' + err.message, 'error');
           console.error(err);
@@ -743,9 +505,8 @@
         const wb = XLSX.read(buf, {cellFormula: true, cellDates: true});
         const EXCLUDE = ['Tulio', 'Claudio', 'Gol Contra', 'Devas'];
 
-        // Aba Idade
         const wsIdade = wb.Sheets['Idade'];
-        if (!wsIdade) throw new Error('Aba "Idade" não encontrada');
+        if (!wsIdade) throw new Error('Aba "Idade" não encontrada na planilha');
         const idadeRows = XLSX.utils.sheet_to_json(wsIdade, {header: 1, blankrows: false, defval: null});
         const apelidoInfo = {};
         for (const row of idadeRows){
@@ -763,7 +524,6 @@
           const ws = wb.Sheets[name];
           if (!ws) throw new Error('Aba "'+name+'" não encontrada');
           const range = XLSX.utils.decode_range(ws['!ref']);
-          // Row 4 (index 3) has dates. Find valid cols (skip SUM totalizer cols).
           const validCols = [];
           for (let c = range.s.c; c <= range.e.c; c++){
             const ref = XLSX.utils.encode_cell({r: 3, c});
@@ -783,7 +543,6 @@
 
           function fixDate(d){
             const x = new Date(d);
-            // Excel year bug: 2026-12-XX should be 2025-12-XX
             if (x.getUTCFullYear() === 2026 && x.getUTCMonth() === 11){
               x.setUTCFullYear(2025);
             }
@@ -864,33 +623,32 @@
 
       function diff(a, b){
         if (a === b) return '<span class="diff-same">'+b+'</span>';
-        return '<span class="diff-old">'+a+'</span> → <span class="diff-new">'+b+'</span>';
+        return '<span class="diff-old">'+a+'</span><span class="diff-new">'+b+'</span>';
       }
 
       function showPreview(d){
         const o = DATA;
         const topG = d.players.filter(p => p.gols > 0).sort((a,b) => b.gols - a.gols).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.gols + ')').join(', ');
+          .map(p => p.apelido + ' (' + p.gols + ')').join(', ') || '—';
         const topA = d.players.filter(p => p.assists > 0).sort((a,b) => b.assists - a.assists).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.assists + ')').join(', ');
+          .map(p => p.apelido + ' (' + p.assists + ')').join(', ') || '—';
         previewEl.innerHTML =
-          '<div class="admin-preview">' +
-          '<div class="row"><span>Jogos disputados</span><span>'+diff(o.totais.jogos, d.totais.jogos)+'</span></div>' +
-          '<div class="row"><span>Gols marcados</span><span>'+diff(o.totais.gols, d.totais.gols)+'</span></div>' +
-          '<div class="row"><span>Assistências</span><span>'+diff(o.totais.assists, d.totais.assists)+'</span></div>' +
-          '<div class="row"><span>Média gols/jogo</span><span>'+diff(o.totais.mediaGols, d.totais.mediaGols)+'</span></div>' +
-          '<div class="row"><span>Total jogadores</span><span>'+diff(o.players.length, d.players.length)+'</span></div>' +
-          '<div class="row"><span>Top 3 artilheiros</span><span class="diff-new">'+topG+'</span></div>' +
-          '<div class="row"><span>Top 3 assistências</span><span class="diff-new">'+topA+'</span></div>' +
-          '<div class="row"><span>Atualizado em</span><span class="diff-new">'+d.atualizadoEm+'</span></div>' +
+          '<div class="upload-preview">' +
+          '<h4>Prévia das mudanças</h4>' +
+          '<div class="row"><span class="label">Jogos disputados</span><span class="val">'+diff(o.totais.jogos, d.totais.jogos)+'</span></div>' +
+          '<div class="row"><span class="label">Gols marcados</span><span class="val">'+diff(o.totais.gols, d.totais.gols)+'</span></div>' +
+          '<div class="row"><span class="label">Assistências</span><span class="val">'+diff(o.totais.assists, d.totais.assists)+'</span></div>' +
+          '<div class="row"><span class="label">Média gols/jogo</span><span class="val">'+diff(o.totais.mediaGols, d.totais.mediaGols)+'</span></div>' +
+          '<div class="row"><span class="label">Top 3 artilheiros</span><span class="val diff-new">'+topG+'</span></div>' +
+          '<div class="row"><span class="label">Top 3 assistências</span><span class="val diff-new">'+topA+'</span></div>' +
+          '<div class="row"><span class="label">Data da atualização</span><span class="val diff-new">'+d.atualizadoEm+'</span></div>' +
           '</div>';
       }
 
-      // Publish via GitHub API
       publishBtn.addEventListener('click', async () => {
         const token = tokenInput.value.trim();
-        if (!token){ msg('Cole seu token do GitHub primeiro', 'error'); return; }
-        if (!newData){ msg('Carregue a planilha primeiro', 'error'); return; }
+        if (!token){ msg('Cole seu token GitHub primeiro (apenas coordenadores podem publicar)', 'error'); return; }
+        if (!newData){ msg('Escolha a planilha primeiro', 'error'); return; }
         localStorage.setItem('gus_pat', token);
         publishBtn.disabled = true;
         msg('Publicando no GitHub...', 'info');
@@ -903,22 +661,22 @@
             'Accept': 'application/vnd.github.v3+json'
           };
           const getRes = await fetch(apiBase, {headers});
-          if (!getRes.ok) throw new Error('Não consegui ler o arquivo (status '+getRes.status+'). Token inválido?');
+          if (!getRes.ok){
+            if (getRes.status === 401) throw new Error('Token inválido ou expirado. Crie um novo no GitHub.');
+            throw new Error('Não consegui ler o arquivo (status '+getRes.status+')');
+          }
           const fileInfo = await getRes.json();
 
-          // Decode (UTF-8 safe)
           const b64 = fileInfo.content.replace(/\s/g, '');
           const bin = atob(b64);
           const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
           const current = new TextDecoder('utf-8').decode(bytes);
 
-          // Replace DATA
           const newJson = JSON.stringify(newData);
           const updated = current.replace(/const DATA = \{[\s\S]*?\};/, 'const DATA = ' + newJson + ';');
-          if (updated === current) throw new Error('Não achei "const DATA" no arquivo pra substituir');
+          if (updated === current) throw new Error('Não achei "const DATA" no arquivo do GitHub');
 
-          // Encode back (UTF-8 safe)
           const enc = new TextEncoder().encode(updated);
           let binStr = '';
           for (let i = 0; i < enc.length; i++) binStr += String.fromCharCode(enc[i]);
@@ -928,7 +686,7 @@
             method: 'PUT',
             headers: Object.assign({}, headers, {'Content-Type': 'application/json'}),
             body: JSON.stringify({
-              message: 'Atualiza dados: ' + newData.totais.jogos + ' jogos, ' + newData.totais.gols + ' gols, ' + newData.totais.assists + ' assists',
+              message: 'Atualiza dados via web: ' + newData.totais.jogos + ' jogos, ' + newData.totais.gols + ' gols, ' + newData.totais.assists + ' assists',
               content: newB64,
               sha: fileInfo.sha
             })
@@ -937,581 +695,7 @@
             const errText = await putRes.text();
             throw new Error('Commit falhou ('+putRes.status+'): ' + errText.substring(0, 200));
           }
-          msg('✓ Publicado! O Vercel vai atualizar o site em ~30 segundos. Aguarde 1 minuto e dê Ctrl+F5 pra confirmar.', 'success');
-        } catch (err) {
-          msg('Erro: ' + err.message, 'error');
-          publishBtn.disabled = false;
-          console.error(err);
-        }
-      });
-    })();
-
-  </script>
-</body>
-</html>
-['apelido','classif'].includes(col) ? 'asc' : 'desc'; }
-          renderFullTable();
-        });
-      });
-    }
-    renderStats();
-    renderEvolucaoChart();
-    renderTop5();
-    renderRankings();
-    renderFullTable();
-    setupTabs();
-    setupFilters();
-    setupSorting();
-    document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
-  
-    // ============ ADMIN PANEL ============
-    (function(){
-      const panel = document.getElementById('admin-panel');
-      const fab = document.getElementById('admin-fab');
-      const tokenInput = document.getElementById('admin-token');
-      const fileInput = document.getElementById('admin-file');
-      const publishBtn = document.getElementById('admin-publish');
-      const closeBtn = document.getElementById('admin-close');
-      const msgEl = document.getElementById('admin-msg');
-      const previewEl = document.getElementById('admin-preview');
-      let newData = null;
-
-      function openPanel(){ panel.classList.add('open'); }
-      function closePanel(){ panel.classList.remove('open'); }
-      function msg(text, type){
-        msgEl.innerHTML = '<div class="admin-msg admin-msg-'+type+'">'+text+'</div>';
-      }
-
-      // Open via ?admin=1 / #admin / FAB / Ctrl+Shift+A
-      if (location.search.includes('admin') || location.hash === '#admin') openPanel();
-      fab.addEventListener('click', openPanel);
-      closeBtn.addEventListener('click', closePanel);
-      document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-          e.preventDefault();
-          panel.classList.toggle('open');
-        }
-        if (e.key === 'Escape' && panel.classList.contains('open')) closePanel();
-      });
-
-      // Restore token
-      const saved = localStorage.getItem('gus_pat');
-      if (saved) tokenInput.value = saved;
-
-      // Process file
-      fileInput.addEventListener('change', async e => {
-        const file = e.target.files[0];
-        if (!file) return;
-        publishBtn.disabled = true;
-        previewEl.innerHTML = '';
-        try {
-          msg('Carregando biblioteca de Excel...', 'info');
-          if (typeof XLSX === 'undefined') {
-            await new Promise((res, rej) => {
-              const s = document.createElement('script');
-              s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-              s.onload = res; s.onerror = () => rej(new Error('falha ao carregar SheetJS'));
-              document.head.appendChild(s);
-            });
-          }
-          msg('Processando planilha...', 'info');
-          const buf = await file.arrayBuffer();
-          newData = processWorkbook(buf);
-          showPreview(newData);
-          publishBtn.disabled = false;
-          msg('Planilha processada com sucesso. Confira a prévia e clique em Publicar.', 'success');
-        } catch (err) {
-          msg('Erro ao processar: ' + err.message, 'error');
-          console.error(err);
-        }
-      });
-
-      function processWorkbook(buf){
-        const wb = XLSX.read(buf, {cellFormula: true, cellDates: true});
-        const EXCLUDE = ['Tulio', 'Claudio', 'Gol Contra', 'Devas'];
-
-        // Aba Idade
-        const wsIdade = wb.Sheets['Idade'];
-        if (!wsIdade) throw new Error('Aba "Idade" não encontrada');
-        const idadeRows = XLSX.utils.sheet_to_json(wsIdade, {header: 1, blankrows: false, defval: null});
-        const apelidoInfo = {};
-        for (const row of idadeRows){
-          const num = row[1], nome = row[2], apelido = row[4], idade = row[7], classif = row[8];
-          if (typeof num !== 'number' || !apelido || typeof apelido !== 'string') continue;
-          apelidoInfo[apelido.trim()] = {
-            apelido: apelido.trim(),
-            nome: typeof nome === 'string' ? nome.trim() : apelido.trim(),
-            idade: typeof idade === 'number' ? Math.floor(idade) : null,
-            classif: classif || 'Mensalista'
-          };
-        }
-
-        function processSheet(name){
-          const ws = wb.Sheets[name];
-          if (!ws) throw new Error('Aba "'+name+'" não encontrada');
-          const range = XLSX.utils.decode_range(ws['!ref']);
-          // Row 4 (index 3) has dates. Find valid cols (skip SUM totalizer cols).
-          const validCols = [];
-          for (let c = range.s.c; c <= range.e.c; c++){
-            const ref = XLSX.utils.encode_cell({r: 3, c});
-            const cell = ws[ref];
-            if (!cell || !(cell.v instanceof Date)) continue;
-            let isSumCol = false;
-            for (let r = 4; r <= Math.min(range.e.r, 50); r++){
-              const dref = XLSX.utils.encode_cell({r, c});
-              const dcell = ws[dref];
-              if (dcell && dcell.f && dcell.f.indexOf('SUM(') !== -1){
-                isSumCol = true;
-                break;
-              }
-            }
-            if (!isSumCol) validCols.push({col: c, date: cell.v});
-          }
-
-          function fixDate(d){
-            const x = new Date(d);
-            // Excel year bug: 2026-12-XX should be 2025-12-XX
-            if (x.getUTCFullYear() === 2026 && x.getUTCMonth() === 11){
-              x.setUTCFullYear(2025);
-            }
-            return x.toISOString().substring(0, 10);
-          }
-
-          const timeline = {};
-          const playerTotals = {};
-          validCols.forEach(({date}) => { timeline[fixDate(date)] = 0; });
-
-          for (let r = 4; r <= range.e.r; r++){
-            const nref = XLSX.utils.encode_cell({r, c: 1});
-            const ncell = ws[nref];
-            if (!ncell || typeof ncell.v !== 'string') continue;
-            const name = ncell.v.trim();
-            if (name === 'Datas' || !name) continue;
-            for (const {col, date} of validCols){
-              const dref = XLSX.utils.encode_cell({r, c: col});
-              const dcell = ws[dref];
-              const v = dcell && typeof dcell.v === 'number' ? dcell.v : 0;
-              if (v > 0){
-                playerTotals[name] = (playerTotals[name] || 0) + v;
-                const key = fixDate(date);
-                timeline[key] = (timeline[key] || 0) + v;
-              }
-            }
-          }
-          return {playerTotals, timeline};
-        }
-
-        const golsData = processSheet('Gols');
-        const astData = processSheet('Assistência');
-
-        const allDates = new Set([...Object.keys(golsData.timeline), ...Object.keys(astData.timeline)]);
-        const timeline = Array.from(allDates).sort().map(d => ({
-          date: d,
-          gols: golsData.timeline[d] || 0,
-          assists: astData.timeline[d] || 0
-        })).filter(t => t.gols > 0 || t.assists > 0);
-
-        const allApelidos = new Set([...Object.keys(golsData.playerTotals), ...Object.keys(astData.playerTotals)]);
-        const players = [];
-        for (const apelido of allApelidos){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          const info = apelidoInfo[apelido];
-          if (!info || info.idade == null) continue;
-          players.push(Object.assign({}, info, {
-            gols: golsData.playerTotals[apelido] || 0,
-            assists: astData.playerTotals[apelido] || 0
-          }));
-        }
-        for (const apelido in apelidoInfo){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          if (apelidoInfo[apelido].idade == null) continue;
-          if (!allApelidos.has(apelido)){
-            players.push(Object.assign({}, apelidoInfo[apelido], {gols: 0, assists: 0}));
-          }
-        }
-
-        const totalGols = Object.values(golsData.playerTotals).reduce((a,b) => a+b, 0);
-        const totalAst = Object.values(astData.playerTotals).reduce((a,b) => a+b, 0);
-        const jogos = timeline.length;
-        const today = new Date().toISOString().substring(0, 10);
-
-        return {
-          totais: {
-            jogos,
-            gols: totalGols,
-            assists: totalAst,
-            mediaGols: jogos > 0 ? Math.round(totalGols/jogos * 100)/100 : 0,
-            mediaAssists: jogos > 0 ? Math.round(totalAst/jogos * 100)/100 : 0
-          },
-          timeline,
-          players,
-          atualizadoEm: today
-        };
-      }
-
-      function diff(a, b){
-        if (a === b) return '<span class="diff-same">'+b+'</span>';
-        return '<span class="diff-old">'+a+'</span> → <span class="diff-new">'+b+'</span>';
-      }
-
-      function showPreview(d){
-        const o = DATA;
-        const topG = d.players.filter(p => p.gols > 0).sort((a,b) => b.gols - a.gols).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.gols + ')').join(', ');
-        const topA = d.players.filter(p => p.assists > 0).sort((a,b) => b.assists - a.assists).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.assists + ')').join(', ');
-        previewEl.innerHTML =
-          '<div class="admin-preview">' +
-          '<div class="row"><span>Jogos disputados</span><span>'+diff(o.totais.jogos, d.totais.jogos)+'</span></div>' +
-          '<div class="row"><span>Gols marcados</span><span>'+diff(o.totais.gols, d.totais.gols)+'</span></div>' +
-          '<div class="row"><span>Assistências</span><span>'+diff(o.totais.assists, d.totais.assists)+'</span></div>' +
-          '<div class="row"><span>Média gols/jogo</span><span>'+diff(o.totais.mediaGols, d.totais.mediaGols)+'</span></div>' +
-          '<div class="row"><span>Total jogadores</span><span>'+diff(o.players.length, d.players.length)+'</span></div>' +
-          '<div class="row"><span>Top 3 artilheiros</span><span class="diff-new">'+topG+'</span></div>' +
-          '<div class="row"><span>Top 3 assistências</span><span class="diff-new">'+topA+'</span></div>' +
-          '<div class="row"><span>Atualizado em</span><span class="diff-new">'+d.atualizadoEm+'</span></div>' +
-          '</div>';
-      }
-
-      // Publish via GitHub API
-      publishBtn.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token){ msg('Cole seu token do GitHub primeiro', 'error'); return; }
-        if (!newData){ msg('Carregue a planilha primeiro', 'error'); return; }
-        localStorage.setItem('gus_pat', token);
-        publishBtn.disabled = true;
-        msg('Publicando no GitHub...', 'info');
-        try {
-          const repo = 'lawtontec/site-gus';
-          const path = 'index.html';
-          const apiBase = 'https://api.github.com/repos/' + repo + '/contents/' + path;
-          const headers = {
-            'Authorization': 'token ' + token,
-            'Accept': 'application/vnd.github.v3+json'
-          };
-          const getRes = await fetch(apiBase, {headers});
-          if (!getRes.ok) throw new Error('Não consegui ler o arquivo (status '+getRes.status+'). Token inválido?');
-          const fileInfo = await getRes.json();
-
-          // Decode (UTF-8 safe)
-          const b64 = fileInfo.content.replace(/\s/g, '');
-          const bin = atob(b64);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const current = new TextDecoder('utf-8').decode(bytes);
-
-          // Replace DATA
-          const newJson = JSON.stringify(newData);
-          const updated = current.replace(/const DATA = \{[\s\S]*?\};/, 'const DATA = ' + newJson + ';');
-          if (updated === current) throw new Error('Não achei "const DATA" no arquivo pra substituir');
-
-          // Encode back (UTF-8 safe)
-          const enc = new TextEncoder().encode(updated);
-          let binStr = '';
-          for (let i = 0; i < enc.length; i++) binStr += String.fromCharCode(enc[i]);
-          const newB64 = btoa(binStr);
-
-          const putRes = await fetch(apiBase, {
-            method: 'PUT',
-            headers: Object.assign({}, headers, {'Content-Type': 'application/json'}),
-            body: JSON.stringify({
-              message: 'Atualiza dados: ' + newData.totais.jogos + ' jogos, ' + newData.totais.gols + ' gols, ' + newData.totais.assists + ' assists',
-              content: newB64,
-              sha: fileInfo.sha
-            })
-          });
-          if (!putRes.ok){
-            const errText = await putRes.text();
-            throw new Error('Commit falhou ('+putRes.status+'): ' + errText.substring(0, 200));
-          }
-          msg('✓ Publicado! O Vercel vai atualizar o site em ~30 segundos. Aguarde 1 minuto e dê Ctrl+F5 pra confirmar.', 'success');
-        } catch (err) {
-          msg('Erro: ' + err.message, 'error');
-          publishBtn.disabled = false;
-          console.error(err);
-        }
-      });
-    })();
-
-  </script>
-</body>
-</html>
-['apelido','classif'].includes(col) ? 'asc' : 'desc'; }
-          renderFullTable();
-        });
-      });
-    }
-    renderStats();
-    renderEvolucaoChart();
-    renderTop5();
-    renderRankings();
-    renderFullTable();
-    setupTabs();
-    setupFilters();
-    setupSorting();
-    document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
-  
-    // ============ ADMIN PANEL ============
-    (function(){
-      const panel = document.getElementById('admin-panel');
-      const fab = document.getElementById('admin-fab');
-      const tokenInput = document.getElementById('admin-token');
-      const fileInput = document.getElementById('admin-file');
-      const publishBtn = document.getElementById('admin-publish');
-      const closeBtn = document.getElementById('admin-close');
-      const msgEl = document.getElementById('admin-msg');
-      const previewEl = document.getElementById('admin-preview');
-      let newData = null;
-
-      function openPanel(){ panel.classList.add('open'); }
-      function closePanel(){ panel.classList.remove('open'); }
-      function msg(text, type){
-        msgEl.innerHTML = '<div class="admin-msg admin-msg-'+type+'">'+text+'</div>';
-      }
-
-      // Open via ?admin=1 / #admin / FAB / Ctrl+Shift+A
-      if (location.search.includes('admin') || location.hash === '#admin') openPanel();
-      fab.addEventListener('click', openPanel);
-      closeBtn.addEventListener('click', closePanel);
-      document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-          e.preventDefault();
-          panel.classList.toggle('open');
-        }
-        if (e.key === 'Escape' && panel.classList.contains('open')) closePanel();
-      });
-
-      // Restore token
-      const saved = localStorage.getItem('gus_pat');
-      if (saved) tokenInput.value = saved;
-
-      // Process file
-      fileInput.addEventListener('change', async e => {
-        const file = e.target.files[0];
-        if (!file) return;
-        publishBtn.disabled = true;
-        previewEl.innerHTML = '';
-        try {
-          msg('Carregando biblioteca de Excel...', 'info');
-          if (typeof XLSX === 'undefined') {
-            await new Promise((res, rej) => {
-              const s = document.createElement('script');
-              s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-              s.onload = res; s.onerror = () => rej(new Error('falha ao carregar SheetJS'));
-              document.head.appendChild(s);
-            });
-          }
-          msg('Processando planilha...', 'info');
-          const buf = await file.arrayBuffer();
-          newData = processWorkbook(buf);
-          showPreview(newData);
-          publishBtn.disabled = false;
-          msg('Planilha processada com sucesso. Confira a prévia e clique em Publicar.', 'success');
-        } catch (err) {
-          msg('Erro ao processar: ' + err.message, 'error');
-          console.error(err);
-        }
-      });
-
-      function processWorkbook(buf){
-        const wb = XLSX.read(buf, {cellFormula: true, cellDates: true});
-        const EXCLUDE = ['Tulio', 'Claudio', 'Gol Contra', 'Devas'];
-
-        // Aba Idade
-        const wsIdade = wb.Sheets['Idade'];
-        if (!wsIdade) throw new Error('Aba "Idade" não encontrada');
-        const idadeRows = XLSX.utils.sheet_to_json(wsIdade, {header: 1, blankrows: false, defval: null});
-        const apelidoInfo = {};
-        for (const row of idadeRows){
-          const num = row[1], nome = row[2], apelido = row[4], idade = row[7], classif = row[8];
-          if (typeof num !== 'number' || !apelido || typeof apelido !== 'string') continue;
-          apelidoInfo[apelido.trim()] = {
-            apelido: apelido.trim(),
-            nome: typeof nome === 'string' ? nome.trim() : apelido.trim(),
-            idade: typeof idade === 'number' ? Math.floor(idade) : null,
-            classif: classif || 'Mensalista'
-          };
-        }
-
-        function processSheet(name){
-          const ws = wb.Sheets[name];
-          if (!ws) throw new Error('Aba "'+name+'" não encontrada');
-          const range = XLSX.utils.decode_range(ws['!ref']);
-          // Row 4 (index 3) has dates. Find valid cols (skip SUM totalizer cols).
-          const validCols = [];
-          for (let c = range.s.c; c <= range.e.c; c++){
-            const ref = XLSX.utils.encode_cell({r: 3, c});
-            const cell = ws[ref];
-            if (!cell || !(cell.v instanceof Date)) continue;
-            let isSumCol = false;
-            for (let r = 4; r <= Math.min(range.e.r, 50); r++){
-              const dref = XLSX.utils.encode_cell({r, c});
-              const dcell = ws[dref];
-              if (dcell && dcell.f && dcell.f.indexOf('SUM(') !== -1){
-                isSumCol = true;
-                break;
-              }
-            }
-            if (!isSumCol) validCols.push({col: c, date: cell.v});
-          }
-
-          function fixDate(d){
-            const x = new Date(d);
-            // Excel year bug: 2026-12-XX should be 2025-12-XX
-            if (x.getUTCFullYear() === 2026 && x.getUTCMonth() === 11){
-              x.setUTCFullYear(2025);
-            }
-            return x.toISOString().substring(0, 10);
-          }
-
-          const timeline = {};
-          const playerTotals = {};
-          validCols.forEach(({date}) => { timeline[fixDate(date)] = 0; });
-
-          for (let r = 4; r <= range.e.r; r++){
-            const nref = XLSX.utils.encode_cell({r, c: 1});
-            const ncell = ws[nref];
-            if (!ncell || typeof ncell.v !== 'string') continue;
-            const name = ncell.v.trim();
-            if (name === 'Datas' || !name) continue;
-            for (const {col, date} of validCols){
-              const dref = XLSX.utils.encode_cell({r, c: col});
-              const dcell = ws[dref];
-              const v = dcell && typeof dcell.v === 'number' ? dcell.v : 0;
-              if (v > 0){
-                playerTotals[name] = (playerTotals[name] || 0) + v;
-                const key = fixDate(date);
-                timeline[key] = (timeline[key] || 0) + v;
-              }
-            }
-          }
-          return {playerTotals, timeline};
-        }
-
-        const golsData = processSheet('Gols');
-        const astData = processSheet('Assistência');
-
-        const allDates = new Set([...Object.keys(golsData.timeline), ...Object.keys(astData.timeline)]);
-        const timeline = Array.from(allDates).sort().map(d => ({
-          date: d,
-          gols: golsData.timeline[d] || 0,
-          assists: astData.timeline[d] || 0
-        })).filter(t => t.gols > 0 || t.assists > 0);
-
-        const allApelidos = new Set([...Object.keys(golsData.playerTotals), ...Object.keys(astData.playerTotals)]);
-        const players = [];
-        for (const apelido of allApelidos){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          const info = apelidoInfo[apelido];
-          if (!info || info.idade == null) continue;
-          players.push(Object.assign({}, info, {
-            gols: golsData.playerTotals[apelido] || 0,
-            assists: astData.playerTotals[apelido] || 0
-          }));
-        }
-        for (const apelido in apelidoInfo){
-          if (EXCLUDE.indexOf(apelido) !== -1) continue;
-          if (apelidoInfo[apelido].idade == null) continue;
-          if (!allApelidos.has(apelido)){
-            players.push(Object.assign({}, apelidoInfo[apelido], {gols: 0, assists: 0}));
-          }
-        }
-
-        const totalGols = Object.values(golsData.playerTotals).reduce((a,b) => a+b, 0);
-        const totalAst = Object.values(astData.playerTotals).reduce((a,b) => a+b, 0);
-        const jogos = timeline.length;
-        const today = new Date().toISOString().substring(0, 10);
-
-        return {
-          totais: {
-            jogos,
-            gols: totalGols,
-            assists: totalAst,
-            mediaGols: jogos > 0 ? Math.round(totalGols/jogos * 100)/100 : 0,
-            mediaAssists: jogos > 0 ? Math.round(totalAst/jogos * 100)/100 : 0
-          },
-          timeline,
-          players,
-          atualizadoEm: today
-        };
-      }
-
-      function diff(a, b){
-        if (a === b) return '<span class="diff-same">'+b+'</span>';
-        return '<span class="diff-old">'+a+'</span> → <span class="diff-new">'+b+'</span>';
-      }
-
-      function showPreview(d){
-        const o = DATA;
-        const topG = d.players.filter(p => p.gols > 0).sort((a,b) => b.gols - a.gols).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.gols + ')').join(', ');
-        const topA = d.players.filter(p => p.assists > 0).sort((a,b) => b.assists - a.assists).slice(0, 3)
-          .map(p => p.apelido + ' (' + p.assists + ')').join(', ');
-        previewEl.innerHTML =
-          '<div class="admin-preview">' +
-          '<div class="row"><span>Jogos disputados</span><span>'+diff(o.totais.jogos, d.totais.jogos)+'</span></div>' +
-          '<div class="row"><span>Gols marcados</span><span>'+diff(o.totais.gols, d.totais.gols)+'</span></div>' +
-          '<div class="row"><span>Assistências</span><span>'+diff(o.totais.assists, d.totais.assists)+'</span></div>' +
-          '<div class="row"><span>Média gols/jogo</span><span>'+diff(o.totais.mediaGols, d.totais.mediaGols)+'</span></div>' +
-          '<div class="row"><span>Total jogadores</span><span>'+diff(o.players.length, d.players.length)+'</span></div>' +
-          '<div class="row"><span>Top 3 artilheiros</span><span class="diff-new">'+topG+'</span></div>' +
-          '<div class="row"><span>Top 3 assistências</span><span class="diff-new">'+topA+'</span></div>' +
-          '<div class="row"><span>Atualizado em</span><span class="diff-new">'+d.atualizadoEm+'</span></div>' +
-          '</div>';
-      }
-
-      // Publish via GitHub API
-      publishBtn.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token){ msg('Cole seu token do GitHub primeiro', 'error'); return; }
-        if (!newData){ msg('Carregue a planilha primeiro', 'error'); return; }
-        localStorage.setItem('gus_pat', token);
-        publishBtn.disabled = true;
-        msg('Publicando no GitHub...', 'info');
-        try {
-          const repo = 'lawtontec/site-gus';
-          const path = 'index.html';
-          const apiBase = 'https://api.github.com/repos/' + repo + '/contents/' + path;
-          const headers = {
-            'Authorization': 'token ' + token,
-            'Accept': 'application/vnd.github.v3+json'
-          };
-          const getRes = await fetch(apiBase, {headers});
-          if (!getRes.ok) throw new Error('Não consegui ler o arquivo (status '+getRes.status+'). Token inválido?');
-          const fileInfo = await getRes.json();
-
-          // Decode (UTF-8 safe)
-          const b64 = fileInfo.content.replace(/\s/g, '');
-          const bin = atob(b64);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const current = new TextDecoder('utf-8').decode(bytes);
-
-          // Replace DATA
-          const newJson = JSON.stringify(newData);
-          const updated = current.replace(/const DATA = \{[\s\S]*?\};/, 'const DATA = ' + newJson + ';');
-          if (updated === current) throw new Error('Não achei "const DATA" no arquivo pra substituir');
-
-          // Encode back (UTF-8 safe)
-          const enc = new TextEncoder().encode(updated);
-          let binStr = '';
-          for (let i = 0; i < enc.length; i++) binStr += String.fromCharCode(enc[i]);
-          const newB64 = btoa(binStr);
-
-          const putRes = await fetch(apiBase, {
-            method: 'PUT',
-            headers: Object.assign({}, headers, {'Content-Type': 'application/json'}),
-            body: JSON.stringify({
-              message: 'Atualiza dados: ' + newData.totais.jogos + ' jogos, ' + newData.totais.gols + ' gols, ' + newData.totais.assists + ' assists',
-              content: newB64,
-              sha: fileInfo.sha
-            })
-          });
-          if (!putRes.ok){
-            const errText = await putRes.text();
-            throw new Error('Commit falhou ('+putRes.status+'): ' + errText.substring(0, 200));
-          }
-          msg('✓ Publicado! O Vercel vai atualizar o site em ~30 segundos. Aguarde 1 minuto e dê Ctrl+F5 pra confirmar.', 'success');
+          msg('✓ Publicado! O site oficial vai atualizar em ~30 segundos. Aguarde 1 minuto e dê Ctrl+F5 para confirmar.', 'success');
         } catch (err) {
           msg('Erro: ' + err.message, 'error');
           publishBtn.disabled = false;
