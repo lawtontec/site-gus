@@ -510,7 +510,7 @@
         const idadeRows = XLSX.utils.sheet_to_json(wsIdade, {header: 1, blankrows: false, defval: null});
         const apelidoInfo = {};
         for (const row of idadeRows){
-          const num = row[1], nome = row[2], apelido = row[4], idade = row[7], classif = row[8];
+          const num = row[0], nome = row[1], apelido = row[3], idade = row[6], classif = row[7];
           if (typeof num !== 'number' || !apelido || typeof apelido !== 'string') continue;
           apelidoInfo[apelido.trim()] = {
             apelido: apelido.trim(),
