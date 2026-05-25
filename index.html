@@ -156,6 +156,20 @@
     .upload-preview .diff-new{color:var(--gus-blue-dark);font-weight:700}
     .upload-preview .diff-same{color:var(--gray-700);font-weight:600}
 
+  
+    .login-card{background:var(--gus-white);border-radius:var(--radius);padding:2.5rem 2rem;box-shadow:var(--shadow-md);border-top:3px solid var(--gus-blue);max-width:420px;margin:0 auto;text-align:center}
+    .login-card h3{color:var(--gus-blue-dark);font-size:1.3rem;margin-bottom:.25rem}
+    .login-card .lead{color:var(--gray-500);font-size:.9rem;margin-bottom:1.5rem}
+    .login-card label{display:block;font-size:.78rem;font-weight:700;color:var(--gray-700);margin-top:1rem;margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.5px;text-align:left}
+    .login-card input{width:100%;padding:.75rem 1rem;border:2px solid var(--gray-200);border-radius:8px;font-family:inherit;font-size:1rem;background:var(--gray-50)}
+    .login-card input:focus{outline:none;border-color:var(--gus-blue);background:var(--gus-white)}
+    .login-card button{margin-top:1.5rem;width:100%;padding:.85rem;background:var(--gus-blue);color:#fff;border:none;border-radius:8px;font-family:inherit;font-weight:700;font-size:1rem;cursor:pointer;transition:background .15s}
+    .login-card button:hover{background:var(--gus-blue-dark)}
+    .login-error{color:var(--gus-red);font-size:.85rem;margin-top:.75rem;font-weight:600}
+    .logged-bar{background:#D1FAE5;color:#065F46;padding:.75rem 1.25rem;border-radius:8px;margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center;font-size:.9rem;max-width:720px;margin-left:auto;margin-right:auto}
+    .logged-bar .logout-btn{background:transparent;color:#065F46;border:1px solid #065F46;padding:.3rem .75rem;border-radius:6px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:inherit}
+    .logged-bar .logout-btn:hover{background:#065F46;color:#fff}
+
   </style>
 </head>
 <body>
@@ -180,7 +194,7 @@
         <a href="#rankings" class="nav-link">Rankings</a>
         <a href="#jogadores" class="nav-link">Jogadores</a>
       
-        <a href="#novos-dados" class="nav-link">Novos Dados</a>
+        <a href="#admin" class="nav-link">Admin</a>
       </nav>
     </div>
   </header>
@@ -272,15 +286,31 @@
       </div>
     </div>
   </section>
-  <section id="novos-dados" class="section section-alt">
+  <section id="admin" class="section section-alt">
     <div class="container">
       <div class="section-header">
-        <h2 class="section-title">Novos Dados</h2>
-        <p class="section-desc">Atualize as estatísticas enviando a planilha Excel</p>
+        <h2 class="section-title">Admin</h2>
+        <p class="section-desc">Área restrita — gerenciamento de dados do site</p>
       </div>
-      <div class="upload-card">
+      <div class="login-card" id="login-card">
+        <h3>Acesso restrito</h3>
+        <p class="lead">Entre com suas credenciais para gerenciar os dados.</p>
+        <label for="login-user">Usuário</label>
+        <input type="text" id="login-user" autocomplete="username" />
+        <label for="login-pass">Senha</label>
+        <input type="password" id="login-pass" autocomplete="current-password" />
+        <button id="login-btn">Entrar</button>
+        <div class="login-error" id="login-error" style="display:none"></div>
+      </div>
+
+      <div id="admin-content" style="display:none">
+        <div class="logged-bar">
+          <span>Conectado como <strong id="logged-user"></strong></span>
+          <button class="logout-btn" id="logout-btn">Sair</button>
+        </div>
+        <div class="upload-card">
         <h3>Carregar planilha</h3>
-        <p class="lead">Envie a planilha de controle do G.U.S. (.xlsx). O site mostra uma prévia dos números atualizados e, se você for o coordenador, publica direto no ar.</p>
+        <p class="lead">Envie a planilha de controle do G.U.S. (.xlsx). O site mostra uma prévia e publica direto no ar.</p>
 
         <div class="upload-section-label" style="font-size:.85rem;font-weight:700;color:var(--gray-700);margin-top:1.25rem;margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.5px">Planilha</div>
         <label class="upload-dropzone" for="upload-file" id="upload-dropzone">
@@ -290,9 +320,7 @@
           <input type="file" id="upload-file" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
         </label>
 
-        <label for="upload-token">Token do GitHub (apenas coordenador)</label>
-        <input type="password" id="upload-token" placeholder="ghp_... (opcional, só pra publicar)" autocomplete="off" />
-        <small>Fica salvo só neste navegador. Sem token, você vê só a prévia. <a href="https://github.com/settings/tokens/new?description=site-gus-admin&scopes=repo" target="_blank" rel="noopener">Criar token →</a></small>
+        <input type="hidden" id="upload-token" />
 
         <div id="upload-msg"></div>
         <div id="upload-preview"></div>
@@ -301,6 +329,7 @@
           <button class="upload-btn upload-btn-publish" id="upload-publish" disabled>Publicar no site</button>
           <button class="upload-btn upload-btn-reset" id="upload-reset">Limpar</button>
         </div>
+      </div>
       </div>
     </div>
   </section>
@@ -426,8 +455,79 @@
     setupSorting();
     document.getElementById('updated-at').textContent = formatDate(DATA.atualizadoEm);
   
-    // ============ NOVOS DADOS (upload de planilha) ============
+    // ============ ADMIN (login + upload) ============
     (function(){
+      // ----- Login system -----
+      const VALID_USER = 'Wagner';
+      const VALID_PASS = 'Wagner@2026@';
+      const _ENC_PAT = 'MAkXMS4Xc3tfUEM6EhEoOwk0L1t2dVMKA1ExBFIDEmAJBwQKFig0Gg==';
+      function _decryptPAT(pass){
+        const data = atob(_ENC_PAT);
+        let out = '';
+        for (let i = 0; i < data.length; i++){
+          out += String.fromCharCode(data.charCodeAt(i) ^ pass.charCodeAt(i % pass.length));
+        }
+        return out;
+      }
+
+      const loginCard = document.getElementById('login-card');
+      const adminContent = document.getElementById('admin-content');
+      const userInput = document.getElementById('login-user');
+      const passInput = document.getElementById('login-pass');
+      const loginBtn = document.getElementById('login-btn');
+      const errorEl = document.getElementById('login-error');
+      const loggedUser = document.getElementById('logged-user');
+      const logoutBtn = document.getElementById('logout-btn');
+
+      function showLogged(user, pass){
+        loginCard.style.display = 'none';
+        adminContent.style.display = 'block';
+        loggedUser.textContent = user;
+        // Decrypt and prefill token in upload form
+        if (pass){
+          const tokenInput = document.getElementById('upload-token');
+          if (tokenInput){
+            try {
+              tokenInput.value = _decryptPAT(pass);
+              sessionStorage.setItem('gus_pass', pass);
+            } catch(e){ console.error('Decrypt failed', e); }
+          }
+        }
+      }
+      function showLogin(){
+        loginCard.style.display = 'block';
+        adminContent.style.display = 'none';
+        passInput.value = '';
+        errorEl.style.display = 'none';
+      }
+      function tryLogin(){
+        const u = userInput.value.trim();
+        const p = passInput.value;
+        if (u === VALID_USER && p === VALID_PASS){
+          sessionStorage.setItem('gus_admin_user', u);
+          errorEl.style.display = 'none';
+          showLogged(u, p);
+        } else {
+          errorEl.textContent = 'Usuário ou senha incorretos';
+          errorEl.style.display = 'block';
+          passInput.value = '';
+          passInput.focus();
+        }
+      }
+      loginBtn.addEventListener('click', tryLogin);
+      passInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+      userInput.addEventListener('keydown', e => { if (e.key === 'Enter') passInput.focus(); });
+      logoutBtn.addEventListener('click', () => {
+        sessionStorage.removeItem('gus_admin_user');
+        sessionStorage.removeItem('gus_pass');
+        showLogin();
+      });
+      // Auto-login if session active
+      const savedUser = sessionStorage.getItem('gus_admin_user');
+      const savedPass = sessionStorage.getItem('gus_pass');
+      if (savedUser === VALID_USER && savedPass) showLogged(savedUser, savedPass);
+
+      // ----- Upload (only relevant after login) -----
       const fileInput = document.getElementById('upload-file');
       const tokenInput = document.getElementById('upload-token');
       const dropzone = document.getElementById('upload-dropzone');
