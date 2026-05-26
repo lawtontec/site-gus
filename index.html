@@ -103,7 +103,7 @@
     .full-table td{padding:.7rem 1rem;border-bottom:1px solid var(--gray-100);font-size:.95rem}
     .full-table tbody tr:hover{background:var(--gray-50)}
     .full-table td:nth-child(1){font-weight:600;color:var(--gray-900)}
-    .full-table td:nth-child(4),.full-table td:nth-child(5),.full-table td:nth-child(6){font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:var(--gus-blue-dark);letter-spacing:1px}
+    .full-table td:nth-child(3),.full-table td:nth-child(4),.full-table td:nth-child(5),.full-table td:nth-child(6){font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:var(--gus-blue-dark);letter-spacing:1px}
     .tag{display:inline-block;padding:.15rem .55rem;border-radius:4px;font-size:.7rem;font-weight:700;letter-spacing:.3px}
     .tag-mensalista{background:#DBEAFE;color:var(--gus-blue-dark)}
     .tag-corneta{background:#FEE2E2;color:var(--gus-red-dark)}
@@ -310,10 +310,11 @@
           <thead><tr>
             <th data-sort="apelido">Apelido</th>
             <th data-sort="idade">Idade</th>
-            <th data-sort="classif">Categoria</th>
             <th data-sort="gols" class="sorted-desc">Gols</th>
+            <th data-sort="mediaGols">Média Gols</th>
             <th data-sort="assists">Assistências</th>
-            <th data-sort="ga">G+A</th>
+            <th data-sort="mediaAssists">Média Assist.</th>
+            <th data-sort="classif">Categoria</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -450,7 +451,11 @@
     function renderFullTable(){
       const filter = document.getElementById('filter-input').value.toLowerCase();
       const cat = document.getElementById('filter-categoria').value;
-      let players = DATA.players.map(p => Object.assign({}, p, {ga: p.gols + p.assists}));
+      const totalJogos = DATA.totais.jogos || 1;
+      let players = DATA.players.map(p => Object.assign({}, p, {
+        mediaGols: Math.round((p.gols / totalJogos) * 100) / 100,
+        mediaAssists: Math.round((p.assists / totalJogos) * 100) / 100
+      }));
       if (filter) players = players.filter(p => p.apelido.toLowerCase().includes(filter));
       if (cat === 'mais65') players = players.filter(p => p.idade >= 60);
       if (cat === 'menos65') players = players.filter(p => p.idade < 60);
@@ -461,9 +466,9 @@
         return dir==='asc' ? va - vb : vb - va;
       });
       const tbody = document.querySelector('#full-table tbody');
-      if (players.length === 0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6B7280;padding:1.5rem">Nenhum jogador encontrado</td></tr>'; return; }
+      if (players.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6B7280;padding:1.5rem">Nenhum jogador encontrado</td></tr>'; return; }
       tbody.innerHTML = players.map(p =>
-        '<tr><td>'+p.apelido+'</td><td>'+p.idade+'</td><td><span class="tag tag-'+(p.classif||'').toLowerCase()+'">'+(p.classif||'-')+'</span></td><td>'+p.gols+'</td><td>'+p.assists+'</td><td>'+p.ga+'</td></tr>'
+        '<tr><td>'+p.apelido+'</td><td>'+p.idade+'</td><td>'+p.gols+'</td><td>'+p.mediaGols.toFixed(2)+'</td><td>'+p.assists+'</td><td>'+p.mediaAssists.toFixed(2)+'</td><td><span class="tag tag-'+(p.classif||'').toLowerCase()+'">'+(p.classif||'-')+'</span></td></tr>'
       ).join('');
       document.querySelectorAll('#full-table th').forEach(th => {
         th.classList.remove('sorted-asc','sorted-desc');
