@@ -538,8 +538,13 @@
         }
       });
     }
+    // Jogadores que não competem mais: saem do Top 5 e dos rankings +60/-60,
+    // mas os gols e assistências deles continuam nos totais e na tabela de jogadores.
+    // Para tirar mais alguém, inclua o apelido (ou nome) na lista.
+    const FORA_DO_RANKING = ['Waguinho'];
+    const noRanking = p => !FORA_DO_RANKING.includes(p.apelido) && !FORA_DO_RANKING.includes(p.nome);
     function renderTop5(){
-      const all = DATA.players.filter(p => p.gols>0 || p.assists>0);
+      const all = DATA.players.filter(p => (p.gols>0 || p.assists>0) && noRanking(p));
       const tg = [...all].sort((a,b) => b.gols - a.gols || b.assists - a.assists).slice(0,5);
       const ta = [...all].sort((a,b) => b.assists - a.assists || b.gols - a.gols).slice(0,5);
       document.getElementById('top-gols').innerHTML = tg.map((p,i) =>
@@ -550,8 +555,8 @@
       ).join('');
     }
     function renderRankings(){
-      const m65 = DATA.players.filter(p => p.idade >= 60);
-      const me65 = DATA.players.filter(p => p.idade < 60);
+      const m65 = DATA.players.filter(p => p.idade >= 60 && noRanking(p));
+      const me65 = DATA.players.filter(p => p.idade < 60 && noRanking(p));
       renderRankTable('rank-mais60-gols', m65, 'gols');
       renderRankTable('rank-mais60-assists', m65, 'assists');
       renderRankTable('rank-menos60-gols', me65, 'gols');
