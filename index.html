@@ -61,6 +61,20 @@
     .badge-red{background:var(--gus-red);color:white}
     .badge-blue{background:var(--gus-blue);color:white}
     .chart-card{border-top-color:var(--gus-red)}
+    .period-filter{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.75rem}
+    .period-chip{font-family:inherit;font-size:.82rem;font-weight:700;padding:.45rem .95rem;border-radius:999px;border:2px solid var(--gray-200);background:var(--gus-white);color:var(--gray-700);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+    .period-chip:hover{border-color:var(--gus-blue);color:var(--gus-blue)}
+    .period-chip.active{background:var(--gus-blue);border-color:var(--gus-blue);color:var(--gus-white)}
+    .period-select{font-family:inherit;font-size:.82rem;font-weight:700;padding:.42rem .9rem;border-radius:999px;border:2px solid var(--gray-200);background:var(--gus-white);color:var(--gray-700);cursor:pointer}
+    .period-select:focus{outline:none;border-color:var(--gus-blue)}
+    .period-select.active{border-color:var(--gus-blue);background:#EFF6FF;color:var(--gus-blue-dark)}
+    .period-custom{display:none;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.75rem;font-size:.85rem;font-weight:600;color:var(--gray-500)}
+    .period-custom.open{display:flex}
+    .period-custom input{font-family:inherit;font-size:.85rem;padding:.4rem .7rem;border:2px solid var(--gray-200);border-radius:8px;background:var(--gus-white);color:var(--gray-900)}
+    .period-custom input:focus{outline:none;border-color:var(--gus-blue)}
+    .period-summary{display:flex;flex-wrap:wrap;gap:.3rem 1.25rem;font-size:.85rem;color:var(--gray-500);margin-bottom:1rem;padding:.6rem .9rem;background:var(--gray-50);border-radius:8px}
+    .period-summary b{color:var(--gray-900)}
+    .chart-empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--gray-500);font-weight:600;text-align:center;padding:1rem}
     .chart-wrapper{height:320px;position:relative}
     .podium{list-style:none;display:flex;flex-direction:column;gap:.5rem}
     .podium-item{display:flex;align-items:center;gap:.75rem;padding:.75rem;border-radius:8px;background:var(--gray-50);transition:background .15s}
@@ -133,6 +147,9 @@
       .container{padding:0 1rem}
       .card{padding:1rem}
       .chart-wrapper{height:280px}
+      .period-filter{gap:.4rem}
+      .period-chip,.period-select{font-size:.76rem;padding:.35rem .7rem}
+      .period-summary{font-size:.8rem;gap:.2rem .9rem}
       .stat-card{padding:1rem}
       .stat-value{font-size:2rem}
       .podium-item{padding:.6rem;gap:.5rem}
@@ -265,7 +282,21 @@
         <div class="card chart-card">
           <h3 class="card-title">Evolução por Jogo</h3>
           <p class="card-subtitle">Gols e assistências ao longo da temporada</p>
-          <div class="chart-wrapper"><canvas id="evolucaoChart"></canvas></div>
+          <div class="period-filter" role="group" aria-label="Filtrar período do gráfico">
+            <button type="button" class="period-chip active" data-period="all">Período completo</button>
+            <button type="button" class="period-chip" data-period="12">Últimos 12 meses</button>
+            <button type="button" class="period-chip" data-period="6">Últimos 6 meses</button>
+            <button type="button" class="period-chip" data-period="3">Últimos 3 meses</button>
+            <button type="button" class="period-chip" data-period="1">Último mês</button>
+            <select class="period-select" id="period-select" aria-label="Escolher mês ou ano"></select>
+            <button type="button" class="period-chip" data-period="custom">Personalizado</button>
+          </div>
+          <div class="period-custom" id="period-custom">
+            <label for="period-from">De</label><input type="date" id="period-from">
+            <label for="period-to">até</label><input type="date" id="period-to">
+          </div>
+          <div class="period-summary" id="period-summary"></div>
+          <div class="chart-wrapper"><canvas id="evolucaoChart"></canvas><div class="chart-empty" id="chart-empty">Nenhum jogo nesse período</div></div>
         </div>
       </div>
       <div class="dashboard-row two-col">
@@ -383,10 +414,98 @@
         '<div class="stat-card red"><div class="stat-label">Média de gols</div><div class="stat-value">'+t.mediaGols+'</div><div class="stat-sub">por partida</div></div>' +
         '<div class="stat-card"><div class="stat-label">Assistências</div><div class="stat-value">'+t.assists+'</div><div class="stat-sub">média de '+t.mediaAssists+' por jogo</div></div>';
     }
+    // ============ FILTRO DE PERÍODO DO GRÁFICO ============
+    const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    let evolucaoChart = null;
+    function isoMinusMonths(iso, n){
+      let [y,m,d] = iso.split('-').map(Number);
+      m -= n;
+      while (m < 1){ m += 12; y--; }
+      const lastDay = new Date(y, m, 0).getDate();
+      if (d > lastDay) d = lastDay;
+      return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    }
+    function fmtNum(n){ return n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    // Períodos "Últimos X meses" contam a partir do último jogo registrado
+    function filterTimeline(f){
+      const tl = DATA.timeline;
+      if (!tl.length || f.type === 'all') return tl;
+      if (f.type === 'last'){
+        const start = isoMinusMonths(tl[tl.length-1].date, f.months);
+        return tl.filter(t => t.date > start);
+      }
+      if (f.type === 'month') return tl.filter(t => t.date.substring(0,7) === f.value);
+      if (f.type === 'year') return tl.filter(t => t.date.substring(0,4) === f.value);
+      if (f.type === 'custom') return tl.filter(t => (!f.from || t.date >= f.from) && (!f.to || t.date <= f.to));
+      return tl;
+    }
+    function renderPeriodSummary(tl){
+      const el = document.getElementById('period-summary');
+      if (!tl.length){ el.innerHTML = '<span>Nenhum jogo encontrado no período escolhido</span>'; return; }
+      const g = tl.reduce((s,t) => s + t.gols, 0), a = tl.reduce((s,t) => s + t.assists, 0), n = tl.length;
+      el.innerHTML =
+        '<span><b>' + formatDate(tl[0].date) + '</b> a <b>' + formatDate(tl[n-1].date) + '</b></span>' +
+        '<span><b>' + n + '</b> ' + (n === 1 ? 'jogo' : 'jogos') + '</span>' +
+        '<span><b>' + g + '</b> gols</span>' +
+        '<span><b>' + a + '</b> assistências</span>' +
+        '<span>média de <b>' + fmtNum(g/n) + '</b> gols por jogo</span>';
+    }
+    function updateEvolucaoChart(f){
+      const tl = filterTimeline(f);
+      renderPeriodSummary(tl);
+      document.getElementById('chart-empty').style.display = tl.length ? 'none' : 'flex';
+      if (!evolucaoChart) return;
+      evolucaoChart.data.labels = tl.map(t => ptDate(t.date));
+      evolucaoChart.data.datasets[0].data = tl.map(t => t.gols);
+      evolucaoChart.data.datasets[1].data = tl.map(t => t.assists);
+      evolucaoChart.update();
+    }
+    function setupPeriodFilter(){
+      const tl = DATA.timeline;
+      const chips = document.querySelectorAll('.period-chip');
+      const sel = document.getElementById('period-select');
+      const custom = document.getElementById('period-custom');
+      const from = document.getElementById('period-from');
+      const to = document.getElementById('period-to');
+      const months = [...new Set(tl.map(t => t.date.substring(0,7)))].sort().reverse();
+      const years = [...new Set(tl.map(t => t.date.substring(0,4)))].sort().reverse();
+      sel.innerHTML = '<option value="">Mês ou ano…</option>' +
+        '<optgroup label="Ano">' + years.map(y => '<option value="y:' + y + '">' + y + '</option>').join('') + '</optgroup>' +
+        '<optgroup label="Mês">' + months.map(m => { const [y,mm] = m.split('-'); return '<option value="m:' + m + '">' + MESES[Number(mm)-1] + '/' + y + '</option>'; }).join('') + '</optgroup>';
+      if (tl.length){ from.min = to.min = tl[0].date; from.max = to.max = tl[tl.length-1].date; }
+      function setActiveChip(period){ chips.forEach(c => c.classList.toggle('active', c.dataset.period === period)); }
+      function applyCustom(){ updateEvolucaoChart({type:'custom', from: from.value, to: to.value}); }
+      chips.forEach(c => c.addEventListener('click', () => {
+        const p = c.dataset.period;
+        setActiveChip(p);
+        sel.value = '';
+        sel.classList.remove('active');
+        if (p === 'custom'){
+          custom.classList.add('open');
+          if (!from.value && tl.length) from.value = tl[0].date;
+          if (!to.value && tl.length) to.value = tl[tl.length-1].date;
+          applyCustom();
+          return;
+        }
+        custom.classList.remove('open');
+        updateEvolucaoChart(p === 'all' ? {type:'all'} : {type:'last', months: Number(p)});
+      }));
+      sel.addEventListener('change', () => {
+        const v = sel.value;
+        custom.classList.remove('open');
+        if (!v){ setActiveChip('all'); sel.classList.remove('active'); updateEvolucaoChart({type:'all'}); return; }
+        setActiveChip(null);
+        sel.classList.add('active');
+        updateEvolucaoChart(v.startsWith('y:') ? {type:'year', value: v.slice(2)} : {type:'month', value: v.slice(2)});
+      });
+      from.addEventListener('change', applyCustom);
+      to.addEventListener('change', applyCustom);
+      updateEvolucaoChart({type:'all'});
+    }
     function renderEvolucaoChart(){
       const ctx = document.getElementById('evolucaoChart').getContext('2d');
       if (window.ChartDataLabels) Chart.register(window.ChartDataLabels);
-      new Chart(ctx, {
+      evolucaoChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: DATA.timeline.map(t => ptDate(t.date)),
@@ -402,8 +521,8 @@
             tooltip:{ backgroundColor:'#1E3A8A', titleFont:{weight:'bold'}, padding:12, cornerRadius:8 },
             datalabels: {
               display: function(ctx){
-                // Hide on mobile (narrow viewports)
-                return window.innerWidth >= 768;
+                // Hide on mobile (narrow viewports), unless the filtered period has few games
+                return window.innerWidth >= 768 || ctx.chart.data.labels.length <= 12;
               },
               align: function(ctx){ return ctx.datasetIndex === 0 ? 'top' : 'bottom'; },
               anchor: function(ctx){ return ctx.datasetIndex === 0 ? 'end' : 'start'; },
@@ -500,6 +619,7 @@
     }
     renderStats();
     renderEvolucaoChart();
+    setupPeriodFilter();
     renderTop5();
     renderRankings();
     renderFullTable();
