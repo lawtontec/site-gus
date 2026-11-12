@@ -575,7 +575,8 @@
       const filter = document.getElementById('filter-input').value.toLowerCase();
       const cat = document.getElementById('filter-categoria').value;
       const totalJogos = DATA.totais.jogos || 1;
-      let players = DATA.players.map(p => Object.assign({}, p, {
+      // Cornetas não jogam: ficam fora da tabela de jogadores
+      let players = DATA.players.filter(p => (p.classif || '').toLowerCase() !== 'corneta').map(p => Object.assign({}, p, {
         mediaGols: Math.round((p.gols / totalJogos) * 100) / 100,
         mediaAssists: Math.round((p.assists / totalJogos) * 100) / 100
       }));
